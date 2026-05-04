@@ -6,22 +6,83 @@ on:
       - main
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Deploy to EC2
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Application
+        run: npm run build
+
+      - name: Prepare Artifact
+        run: |
+          mkdir artifact
+          cp -r dist artifact/
+          cp package.json artifact/
+          cp package-lock.json artifact/
+
+          cd artifact
+          npm ci --omit-dev
+
+          tar -czf app.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nestjs-build
+          path: artifact/app.tar.gz
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nestjs-build
+
+      - name: Copy Artifact to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          target: "/tmp"
+
+      - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.2.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /var/www/app
-            git pull origin main
-            # npm install
-            # npm run build
-            # pm2 restart app || pm2 start dist/main.js --name app
+            set -e
+
+            APP_DIR=/var/www/app
+
+            mkdir -p $APP_DIR
+
+            tar -xzf /tmp/app.tar.gz -C $APP_DIR
+
+            cd $APP_DIR
+
+            if pm2 describe app > /dev/null; then
+              pm2 reload app --update-env
+            else
+              pm2 start dist/main.js --name app -i max
+            fi
+
+            pm2 save
