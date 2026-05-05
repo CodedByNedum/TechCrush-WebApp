@@ -75,16 +75,26 @@ jobs:
           script: |
             set -e
 
-            APP_DIR=/var/www/app
+            BASE_DIR=/var/www
+            RELEASES_DIR=$BASE_DIR/releases
+            CURRENT_LINK=$BASE_DIR/current
 
-            mkdir -p $APP_DIR
+            # Create releases directory if it doesn't exist
+            mkdir -p $RELEASES_DIR
 
-            rm -rf $APP_DIR/*
+            # Create new release folder with timestamp
+            NEW_RELEASE=$RELEASES_DIR/$(date +%s)
+            mkdir -p $NEW_RELEASE
 
-            tar -xzf /tmp/app.tar.gz -C $APP_DIR
+            # Extract new build into release folder
+            tar -xzf /tmp/app.tar.gz -C $NEW_RELEASE
 
-            cd $APP_DIR
+            # Point current to new release
+            ln -sfn $NEW_RELEASE $CURRENT_LINK
 
+            cd $CURRENT_LINK
+
+            # Start or reload app
             if pm2 describe app > /dev/null; then
               pm2 reload app --update-env
             else
@@ -92,3 +102,5 @@ jobs:
             fi
 
             pm2 save
+
+            ls -dt $RELEASES_DIR/* | tail -n +6 | xargs rm -rf
